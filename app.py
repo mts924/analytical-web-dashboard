@@ -193,3 +193,97 @@ with tab5:
         summary_text = info.get("longBusinessSummary")
         if summary_text:
             st.write(summary_text)
+statsmodels
+import itertools
+import numpy as np
+from statsmodels.tsa.stattools import coint
+tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(["📈 Performance", "⚠️ Risk", "🔗 Correlation",
+                                              "🧺 Portfolio", "🏢 Company", "⚖️ Stat arb"])
+with tab6:
+    st.write("Pairs trading: find two assets whose prices are tied together, "
+             "and bet on their gap closing when it gets unusually wide.")
+
+    if len(prices.columns) < 2:
+        st.warning("Select at least two assets in the sidebar.")
+    else:
+        log_p = np.log(prices)
+
+        # --- 1. Scan every pair for cointegration ---
+        @st.cache_data(ttl=3600)
+        def scan_pairs(log_p):
+            rows = []
+            for a, b in itertools.combinations(log_p.columns, 2):
+                rows.append({"a": a, "b": b, "p-value": coint(log_p[a], log_p[b])[1]})
+            return pd.DataFrame(rows).sort_values("p-value")
+
+        pairs = scan_pairs(log_p)
+        st.subheader("1. Pair scanner")
+        table = pairs.assign(Pair=[f"{label(a)} / {label(b)}" for a, b in zip(pairs["a"], pairs["b"])])
+        st.dataframe(table[["Pair", "p-value"]].style.format({"p-value": "{:.3f}"}),
+                     hide_index=True, use_container_width=True)
+        st.caption("Engle-Granger cointegration test: a p-value below 0.05 suggests the gap "
+                   "between the two prices tends to revert to its average.")
+
+        # --- 2. Analyze one pair ---
+        st.subheader("2. Analyze a pair")
+        cols_list = list(prices.columns)
+        c1, c2 = st.columns(2)
+        a = c1.selectbox("Asset A", cols_list, index=cols_list.index(pairs.iloc[0]["a"]), format_func=label)
+        b = c2.selectbox("Asset B", cols_list, index=cols_list.index(pairs.iloc[0]["b"]), format_func=label)
+
+        if a == b:
+            st.warning("Pick two different assets.")
+        else:
+            s1, s2, s3 = st.columns(3)
+            window = s1.slider("Z-score window (days)", 10, 120, 60, step=5)
+            entry = s2.slider("Entry threshold (z)", 1.0, 3.0, 2.0, step=0.25)
+            exit_z = s3.slider("Exit threshold (z)", 0.0, 1.0, 0.5, step=0.25)
+
+            # Hedge ratio: how many units of B offset one unit of A (regression of log prices)
+            beta = np.polyfit(log_p[b], log_p[a], 1)[0]
+            spread = log_p[a] - beta * log_p[b]
+            z = (spread - spread.rolling(window).mean()) / spread.rolling(window).std()
+
+            # Half-life: how fast the spread closes half its gap
+            lam = np.polyfit(spread.shift(1).iloc[1:], spread.diff().iloc[1:], 1)[0]
+            half_life = -np.log(2) / lam if lam < 0 else float("nan")
+
+            # Trading rule: short the spread above +entry, buy it below -entry, close inside ±exit
+            position = pd.Series(np.nan, index=z.index)
+            position[z > entry] = -1
+            position[z < -entry] = 1
+            position[z.abs() < exit_z] = 0
+            position = position.ffill().fillna(0)
+
+            # Trade on the NEXT day's move, to avoid using information we wouldn't have had
+            spread_ret = returns[a] - beta * returns[b]
+            strat = (position.shift(1) * spread_ret).dropna()
+            equity = (1 + strat).cumprod() * 100
+            trades = int((position.diff().abs() > 0).sum())
+            strat_sharpe = strat.mean() / strat.std() * 252 ** 0.5 if strat.std() > 0 else float("nan")
+
+            m1, m2, m3, m4, m5 = st.columns(5)
+            m1.metric("Cointegration p-value", f"{coint(log_p[a], log_p[b])[1]:.3f}")
+            m2.metric("Hedge ratio β", f"{beta:.2f}")
+            m3.metric("Half-life", f"{half_life:.0f} days" if half_life == half_life else "—")
+            m4.metric("Strategy return", f"{equity.iloc[-1] / 100 - 1:+.1%}")
+            m5.metric("Sharpe / trades", f"{strat_sharpe:.2f} / {trades}")
+
+            rebased_pair = prices[[a, b]] / prices[[a, b]].iloc[0] * 100
+            st.plotly_chart(px.line(rebased_pair, title=f"{label(a)} vs {label(b)} (rebased to 100)"),
+                            use_container_width=True)
+
+            fig_z = px.line(z, title="Z-score of the spread (how unusual the gap is today)")
+            for level in (entry, -entry):
+                fig_z.add_hline(y=level, line_dash="dash", line_color="red")
+            for level in (exit_z, -exit_z):
+                fig_z.add_hline(y=level, line_dash="dot", line_color="grey")
+            fig_z.update_layout(showlegend=False)
+            st.plotly_chart(fig_z, use_container_width=True)
+
+            st.plotly_chart(px.line(equity, title="Strategy equity (100 invested)").update_layout(showlegend=False),
+                            use_container_width=True)
+
+            st.caption("Simplifications: no transaction or borrowing costs, short selling assumed possible, "
+                       "and the hedge ratio is estimated on the whole period, which flatters the backtest "
+                       "slightly (look-ahead bias).")
