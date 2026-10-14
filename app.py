@@ -6,10 +6,40 @@ import streamlit as st
 st.set_page_config(page_title="Market Analytics Dashboard", layout="wide")
 st.title("Market Analytics Dashboard")
 
-# --- Controls in the sidebar ---
-tickers = st.sidebar.multiselect("Assets", ["SPY", "QQQ", "IWM", "GLD", "EWQ", "TLT"],
-                                 default=["SPY", "QQQ", "IWM", "GLD"])
+# --- Asset universe ---
+UNIVERSE = {
+    "US indices (ETFs)": {"SPY": "S&P 500", "QQQ": "Nasdaq 100", "IWM": "Russell 2000", "DIA": "Dow Jones"},
+    "Countries (ETFs)": {"EWQ": "France", "EWG": "Germany", "VGK": "Europe", "EWJ": "Japan",
+                         "EWS": "Singapore", "FXI": "China", "EEM": "Emerging markets"},
+    "Sectors (ETFs)": {"XLK": "US Tech", "XLF": "US Financials", "XLE": "US Energy", "XLV": "US Healthcare"},
+    "Bonds & commodities": {"TLT": "US 20y+ bonds", "HYG": "High-yield bonds", "GLD": "Gold",
+                            "SLV": "Silver", "USO": "Oil"},
+    "US stocks": {"AAPL": "Apple", "MSFT": "Microsoft", "NVDA": "Nvidia", "AMZN": "Amazon",
+                  "GOOGL": "Alphabet", "META": "Meta", "TSLA": "Tesla", "JPM": "JPMorgan"},
+    "European stocks": {"MC.PA": "LVMH", "TTE.PA": "TotalEnergies", "AIR.PA": "Airbus", "OR.PA": "L'Oréal",
+                        "BNP.PA": "BNP Paribas", "ASML.AS": "ASML", "SAP.DE": "SAP"},
+    "Asian stocks": {"D05.SI": "DBS", "7203.T": "Toyota", "2330.TW": "TSMC", "0700.HK": "Tencent"},
+    "Crypto": {"BTC-USD": "Bitcoin", "ETH-USD": "Ethereum"},
+}
+NAMES = {t: n for group in UNIVERSE.values() for t, n in group.items()}
+DEFAULTS = ["SPY", "QQQ", "IWM", "GLD"]
+
+def label(t):
+    return f"{NAMES[t]} ({t})" if t in NAMES else t
+
+# --- Sidebar: choose assets ---
+st.sidebar.header("Assets")
+tickers = []
+for group, assets in UNIVERSE.items():
+    default = [t for t in DEFAULTS if t in assets]
+    with st.sidebar.expander(group, expanded=bool(default)):
+        tickers += st.multiselect(group, list(assets), default=default,
+                                  format_func=label, label_visibility="collapsed")
+custom = st.sidebar.text_input("Other tickers (comma-separated)", placeholder="e.g. NFLX, SAN.PA")
+tickers += [t.strip().upper() for t in custom.split(",") if t.strip()]
+tickers = list(dict.fromkeys(tickers))  # remove duplicates, keep order
 period = st.sidebar.selectbox("Period", ["6mo", "1y", "2y", "5y"], index=1)
+
 if not tickers:
     st.warning("Pick at least one asset.")
     st.stop()
@@ -17,9 +47,28 @@ if not tickers:
 # --- Data (cached for 1 hour) ---
 @st.cache_data(ttl=3600)
 def load_prices(tickers, period):
-    return yf.download(tickers, period=period)["Close"]
+    data = yf.download(tickers, period=period, progress=False)["Close"]
+    if isinstance(data, pd.Series):
+        data = data.to_frame(tickers[0])
+    return data
 
-prices = load_prices(tickers, period)
+@st.cache_data(ttl=86400)
+def load_info(ticker):
+    try:
+        return yf.Ticker(ticker).info
+    except Exception:
+        return {}
+
+data = load_prices(tickers, period).dropna(axis=1, how="all")
+missing = [t for t in tickers if t not in data.columns]
+if missing:
+    st.warning(f"No data found for: {', '.join(missing)}")
+
+# Weekdays only (crypto trades on weekends), and fill exchange holidays with the last price
+prices = data[data.index.dayofweek < 5].ffill().dropna()
+if prices.empty or len(prices) < 2:
+    st.error("Not enough data to analyze. Try other assets or a longer period.")
+    st.stop()
 returns = prices.pct_change().dropna()
 
 # --- Metrics ---
@@ -29,11 +78,14 @@ sharpe = returns.mean() / returns.std() * 252 ** 0.5
 drawdown = prices / prices.cummax() - 1
 summary = pd.DataFrame({"Total return": total_return, "Volatility": volatility,
                         "Sharpe": sharpe, "Max drawdown": drawdown.min()})
+summary.index = [label(t) for t in summary.index]
 
-# --- KPI cards ---
-cols = st.columns(len(tickers))
-for col, t in zip(cols, prices.columns):
-    col.metric(t, f"${prices[t].iloc[-1]:,.2f}", f"{total_return[t]:+.1%}")
+# --- KPI cards, 4 per row ---
+for i in range(0, len(prices.columns), 4):
+    row = st.columns(4)
+    for col, t in zip(row, prices.columns[i:i + 4]):
+        col.metric(label(t), f"{prices[t].iloc[-1]:,.2f}", f"{total_return[t]:+.1%}")
+st.caption("Prices are in each asset's own currency (e.g. EUR for Paris stocks, SGD for DBS).")
 
 # --- Automatic insight ---
 best = summary["Sharpe"].idxmax()
@@ -41,7 +93,8 @@ riskiest = summary["Volatility"].idxmax()
 st.info(f"Best risk-adjusted asset: **{best}** (Sharpe {summary.loc[best, 'Sharpe']:.2f}). "
         f"Most volatile: **{riskiest}** ({summary.loc[riskiest, 'Volatility']:.1%} a year).")
 
-tab1, tab2, tab3, tab4 = st.tabs(["📈 Performance", "⚠️ Risk", "🔗 Correlation", "🧺 Portfolio"])
+tab1, tab2, tab3, tab4, tab5 = st.tabs(["📈 Performance", "⚠️ Risk", "🔗 Correlation",
+                                        "🧺 Portfolio", "🏢 Company"])
 
 with tab1:
     rebased = prices / prices.iloc[0] * 100
@@ -58,20 +111,25 @@ with tab2:
                                        "Sharpe": "{:.2f}", "Max drawdown": "{:.1%}"}))
 
 with tab3:
+    n = len(prices.columns)
     st.plotly_chart(px.imshow(returns.corr(), text_auto=".2f", color_continuous_scale="RdBu_r",
-                              zmin=-1, zmax=1, title="Correlation of daily returns"),
+                              zmin=-1, zmax=1, title="Correlation of daily returns",
+                              height=max(400, 45 * n)),
                     use_container_width=True)
     st.caption("Close to 1 = they move together. Low or negative = good diversification.")
 
 with tab4:
     st.write("Choose how much to put in each asset. Weights are rescaled to add up to 100%.")
-    sliders = st.columns(len(prices.columns))
-    raw = {t: col.slider(t, 0, 100, 25, step=5) for col, t in zip(sliders, prices.columns)}
+    w_raw = {}
+    for i in range(0, len(prices.columns), 4):
+        row = st.columns(4)
+        for col, t in zip(row, prices.columns[i:i + 4]):
+            w_raw[t] = col.slider(label(t), 0, 100, 25, step=5)
 
-    if sum(raw.values()) == 0:
+    if sum(w_raw.values()) == 0:
         st.warning("Give at least one asset a weight above 0.")
     else:
-        weights = pd.Series(raw) / sum(raw.values())
+        weights = pd.Series(w_raw) / sum(w_raw.values())
 
         # Buy and hold: invest once on day 1, never rebalance
         port_value = (prices / prices.iloc[0] * weights).sum(axis=1) * 100
@@ -99,3 +157,39 @@ with tab4:
         fig.update_traces(opacity=0.35)
         fig.update_traces(selector={"name": "Portfolio"}, opacity=1, line_width=4)
         st.plotly_chart(fig, use_container_width=True)
+        st.caption("Simplification: currency movements between assets are ignored.")
+
+with tab5:
+    pick = st.selectbox("Choose an asset", list(prices.columns), format_func=label)
+    info = load_info(pick)
+
+    def fmt_big(x):
+        if not isinstance(x, (int, float)):
+            return "—"
+        for div, suffix in [(1e12, "T"), (1e9, "B"), (1e6, "M")]:
+            if abs(x) >= div:
+                return f"{x / div:.1f}{suffix}"
+        return f"{x:,.0f}"
+
+    def fmt_num(x):
+        return f"{x:.2f}" if isinstance(x, (int, float)) else "—"
+
+    if not info:
+        st.warning("Details are unavailable for this asset right now.")
+    else:
+        st.subheader(info.get("longName", label(pick)))
+        details = [info.get("sector"), info.get("industry"), info.get("country"), info.get("currency")]
+        st.caption(" · ".join(d for d in details if d))
+
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("Market cap", fmt_big(info.get("marketCap") or info.get("totalAssets")))
+        c2.metric("P/E (trailing)", fmt_num(info.get("trailingPE")))
+        c3.metric("P/E (forward)", fmt_num(info.get("forwardPE")))
+        c4.metric("Beta", fmt_num(info.get("beta")))
+
+        low, high = info.get("fiftyTwoWeekLow"), info.get("fiftyTwoWeekHigh")
+        if isinstance(low, (int, float)) and isinstance(high, (int, float)):
+            st.write(f"**52-week range:** {low:,.2f} – {high:,.2f}")
+        summary_text = info.get("longBusinessSummary")
+        if summary_text:
+            st.write(summary_text)
