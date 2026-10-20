@@ -131,7 +131,7 @@ with tab2:
     st.plotly_chart(px.line(rolling_vol, title="30-day rolling volatility (annualized)"),
                     use_container_width=True)
     st.subheader("Risk and return")
-       st.dataframe(summary.style.format({"Total return": "{:.1%}", "Volatility": "{:.1%}",
+    st.dataframe(summary.style.format({"Total return": "{:.1%}", "Volatility": "{:.1%}",
                                        "Sharpe": "{:.2f}", "Sortino": "{:.2f}",
                                        "Max drawdown": "{:.1%}", "Beta": "{:.2f}",
                                        "Alpha": "{:+.1%}"}))
