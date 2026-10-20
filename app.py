@@ -71,15 +71,39 @@ if prices.empty or len(prices) < 2:
     st.stop()
 returns = prices.pct_change().dropna()
 
+# --- Risk-free rate: 3-month US T-bill (^IRX, quoted in % per year) ---
+@st.cache_data(ttl=86400)
+def load_risk_free(period):
+    irx = yf.download("^IRX", period=period, progress=False)["Close"]
+    if isinstance(irx, pd.DataFrame):
+        irx = irx.iloc[:, 0]
+    return float(irx.dropna().mean() / 100) if not irx.dropna().empty else 0.0
+
+rf_annual = load_risk_free(period)
+rf_daily = rf_annual / 252
+
 # --- Metrics ---
 total_return = prices.iloc[-1] / prices.iloc[0] - 1
 volatility = returns.std() * 252 ** 0.5
-sharpe = returns.mean() / returns.std() * 252 ** 0.5
+excess = returns - rf_daily
+sharpe = excess.mean() / returns.std() * 252 ** 0.5
+downside_dev = ((excess.clip(upper=0) ** 2).mean()) ** 0.5 * 252 ** 0.5
+sortino = excess.mean() * 252 / downside_dev
 drawdown = prices / prices.cummax() - 1
-summary = pd.DataFrame({"Total return": total_return, "Volatility": volatility,
-                        "Sharpe": sharpe, "Max drawdown": drawdown.min()})
-summary.index = [label(t) for t in summary.index]
 
+# --- Beta and alpha vs the S&P 500 (CAPM) ---
+bench_ret = load_prices(["SPY"], period)["SPY"].pct_change().reindex(returns.index)
+beta, alpha = {}, {}
+for t in returns.columns:
+    pair = pd.concat([returns[t], bench_ret], axis=1).dropna()
+    r, m = pair.iloc[:, 0], pair.iloc[:, 1]
+    beta[t] = r.cov(m) / m.var()
+    alpha[t] = ((r - rf_daily).mean() - beta[t] * (m - rf_daily).mean()) * 252
+
+summary = pd.DataFrame({"Total return": total_return, "Volatility": volatility,
+                        "Sharpe": sharpe, "Sortino": sortino, "Max drawdown": drawdown.min(),
+                        "Beta": pd.Series(beta), "Alpha": pd.Series(alpha)})
+summary.index = [label(t) for t in summary.index]
 # --- KPI cards, 4 per row ---
 for i in range(0, len(prices.columns), 4):
     row = st.columns(4)
@@ -107,8 +131,12 @@ with tab2:
     st.plotly_chart(px.line(rolling_vol, title="30-day rolling volatility (annualized)"),
                     use_container_width=True)
     st.subheader("Risk and return")
-    st.dataframe(summary.style.format({"Total return": "{:.1%}", "Volatility": "{:.1%}",
-                                       "Sharpe": "{:.2f}", "Max drawdown": "{:.1%}"}))
+       st.dataframe(summary.style.format({"Total return": "{:.1%}", "Volatility": "{:.1%}",
+                                       "Sharpe": "{:.2f}", "Sortino": "{:.2f}",
+                                       "Max drawdown": "{:.1%}", "Beta": "{:.2f}",
+                                       "Alpha": "{:+.1%}"}))
+    st.caption(f"Sharpe and Sortino use a risk-free rate of {rf_annual:.2%} a year "
+               f"(average 3-month US T-bill over the period). Beta and alpha are measured against the S&P 500.")
 
 with tab3:
     n = len(prices.columns)
