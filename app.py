@@ -117,8 +117,9 @@ riskiest = summary["Volatility"].idxmax()
 st.info(f"Best risk-adjusted asset: **{best}** (Sharpe {summary.loc[best, 'Sharpe']:.2f}). "
         f"Most volatile: **{riskiest}** ({summary.loc[riskiest, 'Volatility']:.1%} a year).")
 
-tab1, tab2, tab3, tab4, tab5 = st.tabs(["📈 Performance", "⚠️ Risk", "🔗 Correlation",
-                                        "🧺 Portfolio", "🏢 Company"])
+tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs(["📈 Performance", "⚠️ Risk", "🔗 Correlation",
+                                                    "🧺 Portfolio", "🏢 Company", "⚖️ Stat arb",
+                                                    "📘 Methodology"])
 
 with tab1:
     rebased = prices / prices.iloc[0] * 100
@@ -314,3 +315,57 @@ with tab6:
             st.caption("Simplifications: no transaction or borrowing costs, short selling assumed possible, "
                        "and the hedge ratio is estimated on the whole period, which flatters the backtest "
                        "slightly (look-ahead bias).")
+with tab7:
+    st.header("Methodology")
+    st.write("How every number in this dashboard is calculated.")
+
+    with st.expander("Returns and volatility", expanded=True):
+        st.latex(r"r_t = \frac{P_t}{P_{t-1}} - 1")
+        st.write("Daily simple return, from adjusted closing prices (dividends and splits included).")
+        st.latex(r"\sigma_{\text{annual}} = \sigma_{\text{daily}} \times \sqrt{252}")
+        st.write("Volatility is annualized with √252, the number of trading days in a year, "
+                 "because the variances of independent daily returns add up over time.")
+
+    with st.expander("Sharpe and Sortino ratios"):
+        st.latex(r"\text{Sharpe} = \frac{\overline{r - r_f}}{\sigma_{\text{daily}}} \times \sqrt{252}")
+        st.latex(r"\text{Sortino} = \frac{\overline{r - r_f} \times 252}{\sigma_{\text{down}}}, \qquad "
+                 r"\sigma_{\text{down}} = \sqrt{\overline{\min(r - r_f,\, 0)^2}} \times \sqrt{252}")
+        st.write(f"The risk-free rate is the average 3-month US T-bill yield over the period "
+                 f"({rf_annual:.2%} a year). Sortino only penalizes returns below the risk-free rate.")
+
+    with st.expander("Maximum drawdown"):
+        st.latex(r"DD_t = \frac{P_t}{\max_{s \le t} P_s} - 1, \qquad \text{MDD} = \min_t DD_t")
+        st.write("The worst fall from a running peak to a subsequent trough over the period.")
+
+    with st.expander("Beta and alpha (CAPM)"):
+        st.latex(r"\beta = \frac{\operatorname{Cov}(r, r_m)}{\operatorname{Var}(r_m)}")
+        st.latex(r"\alpha = \left[\, \overline{r - r_f} - \beta \, \overline{r_m - r_f} \,\right] \times 252")
+        st.write("The market is the S&P 500 (SPY). Alpha is the annual return not explained by "
+                 "the asset's exposure to the market.")
+
+    with st.expander("Correlation and portfolio"):
+        st.write("Correlations are Pearson correlations of daily returns.")
+        st.latex(r"V_t = 100 \times \sum_i w_i \, \frac{P_{i,t}}{P_{i,0}}")
+        st.write("The portfolio is buy and hold: invested once at the start and never rebalanced. "
+                 "Currency movements between assets are ignored.")
+
+    with st.expander("Statistical arbitrage"):
+        st.latex(r"s_t = \ln P^A_t - \beta \, \ln P^B_t")
+        st.latex(r"z_t = \frac{s_t - \mu^{(w)}_t}{\sigma^{(w)}_t}")
+        st.latex(r"\Delta s_t = c + \lambda \, s_{t-1} + \varepsilon_t, \qquad "
+                 r"\text{half-life} = -\frac{\ln 2}{\lambda}")
+        st.write("Cointegration is tested with the Engle-Granger method. The strategy shorts the spread "
+                 "when z exceeds the entry threshold, buys it below minus the threshold, and closes "
+                 "inside the exit band. Signals are traded the next day. Known limitations: the hedge "
+                 "ratio is estimated on the full sample (look-ahead bias), and there are no transaction "
+                 "or borrowing costs.")
+
+    with st.expander("Data and limitations"):
+        st.write(f"""
+- Source: Yahoo Finance (via yfinance), refreshed at most once an hour. Last data point: {prices.index[-1]:%B %d, %Y}.
+- Weekdays only; exchange holidays are filled with the last available price.
+- Prices are in each asset's own currency.
+- Past performance does not predict future results.
+""")
+
+    st.warning("This dashboard is an educational project and does not constitute investment advice.")
