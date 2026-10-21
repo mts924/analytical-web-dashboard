@@ -1,11 +1,13 @@
 # 📈 Market Analytics Dashboard
 
-**Live app → [your-app-link.streamlit.app](https://your-app-link.streamlit.app)**
+**Live app → https://analytical-web-dashboard-motevally.streamlit.app **
 
 An interactive web dashboard to analyze the performance, risk and relationships of 40+ assets
 (ETFs, US / European / Asian stocks, bonds, commodities and crypto), built in Python with Streamlit.
 
-![Dashboard overview](SCREENSHOT_1)
+![Dashboard overview]
+<img width="1464" height="832" alt="Capture d’écran 2026-10-21 à 21 18 05" src="https://github.com/user-attachments/assets/3aa13f2f-561c-4583-9165-46529dac24ce" />
+
 
 ## Features
 
@@ -19,7 +21,9 @@ An interactive web dashboard to analyze the performance, risk and relationships 
 | ⚖️ Stat arb | Pairs trading: cointegration scanner and out-of-sample backtest with transaction costs |
 | 📘 Methodology | Every formula used in the app |
 
-![Statistical arbitrage tab](SCREENSHOT_2)
+![Statistical arbitrage tab]
+<img width="1464" height="832" alt="Capture d’écran 2026-10-21 à 21 21 01" src="https://github.com/user-attachments/assets/612006b3-387e-4179-b92b-74a6b86df42c" />
+
 
 ## Methodology highlights
 
