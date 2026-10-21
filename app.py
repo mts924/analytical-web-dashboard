@@ -236,85 +236,112 @@ with tab6:
     else:
         log_p = np.log(prices)
 
-        # --- 1. Scan every pair for cointegration ---
-        @st.cache_data(ttl=3600)
-        def scan_pairs(log_p):
-            rows = []
-            for a, b in itertools.combinations(log_p.columns, 2):
-                rows.append({"a": a, "b": b, "p-value": coint(log_p[a], log_p[b])[1]})
-            return pd.DataFrame(rows).sort_values("p-value")
+        # --- Train / test split: find and fit the pair on the past, test it on later data ---
+        train_pct = st.slider("Share of the period used for training (%)", 30, 80, 50, step=5)
+        split = int(len(log_p) * train_pct / 100)
+        train, test = log_p.iloc[:split], log_p.iloc[split:]
+        split_date = test.index[0]
+        st.caption(f"Training: {train.index[0]:%b %d, %Y} → {train.index[-1]:%b %d, %Y}  ·  "
+                   f"Testing (out-of-sample): {test.index[0]:%b %d, %Y} → {test.index[-1]:%b %d, %Y}")
 
-        pairs = scan_pairs(log_p)
-        st.subheader("1. Pair scanner")
-        table = pairs.assign(Pair=[f"{label(a)} / {label(b)}" for a, b in zip(pairs["a"], pairs["b"])])
-        st.dataframe(table[["Pair", "p-value"]].style.format({"p-value": "{:.3f}"}),
-                     hide_index=True, use_container_width=True)
-        st.caption("Engle-Granger cointegration test: a p-value below 0.05 suggests the gap "
-                   "between the two prices tends to revert to its average.")
-
-        # --- 2. Analyze one pair ---
-        st.subheader("2. Analyze a pair")
-        cols_list = list(prices.columns)
-        c1, c2 = st.columns(2)
-        a = c1.selectbox("Asset A", cols_list, index=cols_list.index(pairs.iloc[0]["a"]), format_func=label)
-        b = c2.selectbox("Asset B", cols_list, index=cols_list.index(pairs.iloc[0]["b"]), format_func=label)
-
-        if a == b:
-            st.warning("Pick two different assets.")
+        if len(train) < 60 or len(test) < 30:
+            st.warning("Not enough data for a train/test split. Choose a longer period (2y or 5y).")
         else:
-            s1, s2, s3 = st.columns(3)
-            window = s1.slider("Z-score window (days)", 10, 120, 60, step=5)
-            entry = s2.slider("Entry threshold (z)", 1.0, 3.0, 2.0, step=0.25)
-            exit_z = s3.slider("Exit threshold (z)", 0.0, 1.0, 0.5, step=0.25)
+            # --- 1. Scan pairs on the TRAINING period only ---
+            @st.cache_data(ttl=3600)
+            def scan_pairs(log_p):
+                rows = []
+                for a, b in itertools.combinations(log_p.columns, 2):
+                    rows.append({"a": a, "b": b, "p-value": coint(log_p[a], log_p[b])[1]})
+                return pd.DataFrame(rows).sort_values("p-value")
 
-            # Hedge ratio: how many units of B offset one unit of A (regression of log prices)
-            beta = np.polyfit(log_p[b], log_p[a], 1)[0]
-            spread = log_p[a] - beta * log_p[b]
-            z = (spread - spread.rolling(window).mean()) / spread.rolling(window).std()
+            pairs = scan_pairs(train)
+            st.subheader("1. Pair scanner (training period)")
+            table = pairs.assign(Pair=[f"{label(a)} / {label(b)}" for a, b in zip(pairs["a"], pairs["b"])])
+            st.dataframe(table[["Pair", "p-value"]].style.format({"p-value": "{:.3f}"}),
+                         hide_index=True, use_container_width=True)
+            st.caption(f"Engle-Granger test on the training period only. With {len(pairs)} pairs tested, "
+                       f"about {len(pairs) * 0.05:.0f} could fall below 0.05 by pure chance.")
 
-            # Half-life: how fast the spread closes half its gap
-            lam = np.polyfit(spread.shift(1).iloc[1:], spread.diff().iloc[1:], 1)[0]
-            half_life = -np.log(2) / lam if lam < 0 else float("nan")
+            # --- 2. Backtest one pair ---
+            st.subheader("2. Backtest a pair")
+            cols_list = list(prices.columns)
+            c1, c2 = st.columns(2)
+            a = c1.selectbox("Asset A", cols_list, index=cols_list.index(pairs.iloc[0]["a"]), format_func=label)
+            b = c2.selectbox("Asset B", cols_list, index=cols_list.index(pairs.iloc[0]["b"]), format_func=label)
 
-            # Trading rule: short the spread above +entry, buy it below -entry, close inside ±exit
-            position = pd.Series(np.nan, index=z.index)
-            position[z > entry] = -1
-            position[z < -entry] = 1
-            position[z.abs() < exit_z] = 0
-            position = position.ffill().fillna(0)
+            if a == b:
+                st.warning("Pick two different assets.")
+            else:
+                s1, s2, s3, s4 = st.columns(4)
+                window = s1.slider("Z-score window (days)", 10, 120, 40, step=5)
+                entry = s2.slider("Entry threshold (z)", 1.0, 3.0, 2.0, step=0.25)
+                exit_z = s3.slider("Exit threshold (z)", 0.0, 1.0, 0.5, step=0.25)
+                cost_bps = s4.slider("Cost per trade (bps)", 0, 50, 10, step=5)
 
-            # Trade on the NEXT day's move, to avoid using information we wouldn't have had
-            spread_ret = returns[a] - beta * returns[b]
-            strat = (position.shift(1) * spread_ret).dropna()
-            equity = (1 + strat).cumprod() * 100
-            trades = int((position.diff().abs() > 0).sum())
-            strat_sharpe = strat.mean() / strat.std() * 252 ** 0.5 if strat.std() > 0 else float("nan")
+                # Hedge ratio and half-life estimated on the TRAINING period only
+                beta = np.polyfit(train[b], train[a], 1)[0]
+                spread = log_p[a] - beta * log_p[b]
+                s_tr = spread.loc[train.index]
+                lam = np.polyfit(s_tr.shift(1).iloc[1:], s_tr.diff().iloc[1:], 1)[0]
+                half_life = -np.log(2) / lam if lam < 0 else float("nan")
 
-            m1, m2, m3, m4, m5 = st.columns(5)
-            m1.metric("Cointegration p-value", f"{coint(log_p[a], log_p[b])[1]:.3f}")
-            m2.metric("Hedge ratio β", f"{beta:.2f}")
-            m3.metric("Half-life", f"{half_life:.0f} days" if half_life == half_life else "—")
-            m4.metric("Strategy return", f"{equity.iloc[-1] / 100 - 1:+.1%}")
-            m5.metric("Sharpe / trades", f"{strat_sharpe:.2f} / {trades}")
+                # The rolling z-score only uses past data, so it can be computed everywhere
+                z = (spread - spread.rolling(window).mean()) / spread.rolling(window).std()
 
-            rebased_pair = prices[[a, b]] / prices[[a, b]].iloc[0] * 100
-            st.plotly_chart(px.line(rebased_pair, title=f"{label(a)} vs {label(b)} (rebased to 100)"),
-                            use_container_width=True)
+                position = pd.Series(np.nan, index=z.index)
+                position[z > entry] = -1
+                position[z < -entry] = 1
+                position[z.abs() < exit_z] = 0
+                position = position.ffill().fillna(0)
+                position[position.index < split_date] = 0  # trade only in the test period
 
-            fig_z = px.line(z, title="Z-score of the spread (how unusual the gap is today)")
-            for level in (entry, -entry):
-                fig_z.add_hline(y=level, line_dash="dash", line_color="red")
-            for level in (exit_z, -exit_z):
-                fig_z.add_hline(y=level, line_dash="dot", line_color="grey")
-            fig_z.update_layout(showlegend=False)
-            st.plotly_chart(fig_z, use_container_width=True)
+                # Trade on the NEXT day, and pay costs on both legs whenever the position changes
+                spread_ret = returns[a] - beta * returns[b]
+                held = position.shift(1).reindex(spread_ret.index).fillna(0)
+                turnover = held.diff().abs().fillna(0)
+                costs = turnover * (1 + abs(beta)) * cost_bps / 10_000
+                strat = (held * spread_ret - costs).loc[split_date:]
+                equity = (1 + strat).cumprod() * 100
+                trades = int((turnover.loc[split_date:] > 0).sum())
+                oos_sharpe = strat.mean() / strat.std() * 252 ** 0.5 if strat.std() > 0 else float("nan")
+                p_train = coint(train[a], train[b])[1]
+                p_test = coint(test[a], test[b])[1]
 
-            st.plotly_chart(px.line(equity, title="Strategy equity (100 invested)").update_layout(showlegend=False),
-                            use_container_width=True)
+                m1, m2, m3 = st.columns(3)
+                m1.metric("Cointegration p-value (train)", f"{p_train:.3f}")
+                m2.metric("Cointegration p-value (test)", f"{p_test:.3f}")
+                m3.metric("Hedge ratio β (train)", f"{beta:.2f}")
+                m4, m5, m6 = st.columns(3)
+                m4.metric("Half-life (train)", f"{half_life:.0f} days" if half_life == half_life else "—")
+                m5.metric("Out-of-sample return (after costs)", f"{equity.iloc[-1] / 100 - 1:+.1%}")
+                m6.metric("Out-of-sample Sharpe / trades", f"{oos_sharpe:.2f} / {trades}")
 
-            st.caption("Simplifications: no transaction or borrowing costs, short selling assumed possible, "
-                       "and the hedge ratio is estimated on the whole period, which flatters the backtest "
-                       "slightly (look-ahead bias).")
+                if p_train < 0.05 and p_test > 0.10:
+                    st.warning("The pair looked cointegrated in training but not in the test period: "
+                               "the relationship may have broken down. This is the main risk of pairs trading.")
+
+                shade = dict(x0=log_p.index[0], x1=split_date, fillcolor="grey", opacity=0.15, line_width=0)
+
+                rebased_pair = prices[[a, b]] / prices[[a, b]].iloc[0] * 100
+                fig_p = px.line(rebased_pair, title=f"{label(a)} vs {label(b)} (grey = training period)")
+                fig_p.add_vrect(**shade)
+                st.plotly_chart(fig_p, use_container_width=True)
+
+                fig_z = px.line(z, title="Z-score of the spread (trading only happens outside the grey area)")
+                fig_z.add_vrect(**shade)
+                for level in (entry, -entry):
+                    fig_z.add_hline(y=level, line_dash="dash", line_color="red")
+                for level in (exit_z, -exit_z):
+                    fig_z.add_hline(y=level, line_dash="dot", line_color="grey")
+                fig_z.update_layout(showlegend=False)
+                st.plotly_chart(fig_z, use_container_width=True)
+
+                fig_e = px.line(equity, title="Out-of-sample equity after costs (100 invested)")
+                fig_e.update_layout(showlegend=False)
+                st.plotly_chart(fig_e, use_container_width=True)
+                st.caption("Costs are charged on both legs each time the position changes. "
+                           "Borrowing costs for the short leg are not included.")
 with tab7:
     st.header("Methodology")
     st.write("How every number in this dashboard is calculated.")
@@ -354,11 +381,12 @@ with tab7:
         st.latex(r"z_t = \frac{s_t - \mu^{(w)}_t}{\sigma^{(w)}_t}")
         st.latex(r"\Delta s_t = c + \lambda \, s_{t-1} + \varepsilon_t, \qquad "
                  r"\text{half-life} = -\frac{\ln 2}{\lambda}")
-        st.write("Cointegration is tested with the Engle-Granger method. The strategy shorts the spread "
-                 "when z exceeds the entry threshold, buys it below minus the threshold, and closes "
-                 "inside the exit band. Signals are traded the next day. Known limitations: the hedge "
-                 "ratio is estimated on the full sample (look-ahead bias), and there are no transaction "
-                 "or borrowing costs.")
+        st.write("Pairs are scanned and fitted on a training period only (cointegration test, hedge ratio, "
+                 "half-life), then traded on the later, unseen test period. The strategy shorts the spread "
+                 "when z exceeds the entry threshold, buys it below minus the threshold, and closes inside "
+                 "the exit band. Signals are traded the next day, and transaction costs are charged on both "
+                 "legs at each position change. Remaining limitations: the hedge ratio stays fixed after "
+                 "training, and borrowing costs for the short leg are ignored.")
 
     with st.expander("Data and limitations"):
         st.write(f"""
