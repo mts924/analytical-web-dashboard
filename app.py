@@ -82,24 +82,18 @@ def load_risk_free(period):
 rf_annual = load_risk_free(period)
 rf_daily = rf_annual / 252
 
-# --- Metrics ---
-total_return = prices.iloc[-1] / prices.iloc[0] - 1
-volatility = returns.std() * 252 ** 0.5
-excess = returns - rf_daily
-sharpe = excess.mean() / returns.std() * 252 ** 0.5
-downside_dev = ((excess.clip(upper=0) ** 2).mean()) ** 0.5 * 252 ** 0.5
-sortino = excess.mean() * 252 / downside_dev
-drawdown = prices / prices.cummax() - 1
+# --- Metrics (calculations live in metrics.py) ---
+total_return = fm.total_return(prices)
+volatility = fm.annualized_volatility(returns)
+sharpe = fm.sharpe_ratio(returns, rf_annual)
+sortino = fm.sortino_ratio(returns, rf_annual)
+drawdown = fm.drawdown(prices)
 
 # --- Beta and alpha vs the S&P 500 (CAPM) ---
 bench_ret = load_prices(["SPY"], period)["SPY"].pct_change().reindex(returns.index)
 beta, alpha = {}, {}
 for t in returns.columns:
-    pair = pd.concat([returns[t], bench_ret], axis=1).dropna()
-    r, m = pair.iloc[:, 0], pair.iloc[:, 1]
-    beta[t] = r.cov(m) / m.var()
-    alpha[t] = ((r - rf_daily).mean() - beta[t] * (m - rf_daily).mean()) * 252
-
+    beta[t], alpha[t] = fm.beta_alpha(returns[t], bench_ret, rf_annual)
 summary = pd.DataFrame({"Total return": total_return, "Volatility": volatility,
                         "Sharpe": sharpe, "Sortino": sortino, "Max drawdown": drawdown.min(),
                         "Beta": pd.Series(beta), "Alpha": pd.Series(alpha)})
@@ -225,6 +219,7 @@ with tab5:
 import itertools
 import numpy as np
 from statsmodels.tsa.stattools import coint
+import metrics as fm
 tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(["📈 Performance", "⚠️ Risk", "🔗 Correlation",
                                               "🧺 Portfolio", "🏢 Company", "⚖️ Stat arb"])
 with tab6:
@@ -280,12 +275,10 @@ with tab6:
                 cost_bps = s4.slider("Cost per trade (bps)", 0, 50, 10, step=5)
 
                 # Hedge ratio and half-life estimated on the TRAINING period only
-                beta = np.polyfit(train[b], train[a], 1)[0]
+                beta = fm.hedge_ratio(train[a], train[b])
                 spread = log_p[a] - beta * log_p[b]
                 s_tr = spread.loc[train.index]
-                lam = np.polyfit(s_tr.shift(1).iloc[1:], s_tr.diff().iloc[1:], 1)[0]
-                half_life = -np.log(2) / lam if lam < 0 else float("nan")
-
+                half_life = fm.half_life(s_tr)
                 # The rolling z-score only uses past data, so it can be computed everywhere
                 z = (spread - spread.rolling(window).mean()) / spread.rolling(window).std()
 
