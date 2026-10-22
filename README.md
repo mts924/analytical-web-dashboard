@@ -1,11 +1,11 @@
 # 📈 Market Analytics Dashboard
 ![tests](https://github.com/mts924/analytical-web-dashboard/actions/workflows/tests.yml/badge.svg)
-**Live app → https://analytical-web-dashboard-motevally.streamlit.app **
+
+**Live app → https://analytical-web-dashboard-motevally.streamlit.app**
 
 An interactive web dashboard to analyze the performance, risk and relationships of 40+ assets
 (ETFs, US / European / Asian stocks, bonds, commodities and crypto), built in Python with Streamlit.
 
-![Dashboard overview]
 <img width="1464" height="832" alt="Capture d’écran 2026-10-21 à 21 18 05" src="https://github.com/user-attachments/assets/3aa13f2f-561c-4583-9165-46529dac24ce" />
 
 
