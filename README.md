@@ -1,5 +1,5 @@
 # 📈 Market Analytics Dashboard
-
+![tests](https://github.com/mts924/analytical-web-dashboard/actions/workflows/tests.yml/badge.svg)
 **Live app → https://analytical-web-dashboard-motevally.streamlit.app **
 
 An interactive web dashboard to analyze the performance, risk and relationships of 40+ assets
