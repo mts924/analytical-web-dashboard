@@ -53,4 +53,4 @@ portfolio ignores exchange-rate movements. Short-selling borrowing costs are not
 
 ## Author
 
-**Julia Motevally**: [LinkedIn](https://linkedin.com/in/julia-motevally-b25b482b5)
+**Mathis Motevally**: [LinkedIn](https://linkedin.com/in/mathis-motevally)
