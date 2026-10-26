@@ -164,7 +164,7 @@ with tab4:
 
         p_return = port_value.iloc[-1] / 100 - 1
         p_vol = port_ret.std() * 252 ** 0.5
-        p_sharpe = port_ret.mean() / port_ret.std() * 252 ** 0.5
+        p_sharpe = fm.sharpe_ratio(port_ret, rf_annual)
         p_mdd = (port_value / port_value.cummax() - 1).min()
 
         c1, c2, c3, c4 = st.columns(4)
