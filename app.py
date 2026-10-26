@@ -121,14 +121,14 @@ tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs(["📈 Performance", "⚠️ 
 
 with tab1:
     rebased = prices / prices.iloc[0] * 100
-    st.plotly_chart(px.line(rebased, title="Value of 100 invested"), use_container_width=True)
+    st.plotly_chart(px.line(rebased, title="Value of 100 invested"), width="stretch")
     st.caption("Every asset starts at 100, so they can be compared on the same scale.")
 
 with tab2:
-    st.plotly_chart(px.line(drawdown, title="Drawdown from peak"), use_container_width=True)
+    st.plotly_chart(px.line(drawdown, title="Drawdown from peak"), width="stretch")
     rolling_vol = returns.rolling(30).std() * 252 ** 0.5
     st.plotly_chart(px.line(rolling_vol, title="30-day rolling volatility (annualized)"),
-                    use_container_width=True)
+                   width="stretch")
     st.subheader("Risk and return")
     st.dataframe(summary.style.format({"Total return": "{:.1%}", "Volatility": "{:.1%}",
                                        "Sharpe": "{:.2f}", "Sortino": "{:.2f}",
@@ -142,7 +142,7 @@ with tab3:
     st.plotly_chart(px.imshow(returns.corr(), text_auto=".2f", color_continuous_scale="RdBu_r",
                               zmin=-1, zmax=1, title="Correlation of daily returns",
                               height=max(400, 45 * n)),
-                    use_container_width=True)
+                    width="stretch")
     st.caption("Close to 1 = they move together. Low or negative = good diversification.")
 
 with tab4:
@@ -183,7 +183,7 @@ with tab4:
         fig = px.line(chart, title="Your portfolio vs each asset (100 invested)")
         fig.update_traces(opacity=0.35)
         fig.update_traces(selector={"name": "Portfolio"}, opacity=1, line_width=4)
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width="stretch")
         st.caption("Simplification: currency movements between assets are ignored.")
 
 with tab5:
@@ -258,7 +258,7 @@ with tab6:
             st.subheader("1. Pair scanner (training period)")
             table = pairs.assign(Pair=[f"{label(a)} / {label(b)}" for a, b in zip(pairs["a"], pairs["b"])])
             st.dataframe(table[["Pair", "p-value"]].style.format({"p-value": "{:.3f}"}),
-                         hide_index=True, use_container_width=True)
+                         hide_index=True, width="stretch")
             st.caption(f"Engle-Granger test on the training period only. With {len(pairs)} pairs tested, "
                        f"about {len(pairs) * 0.05:.0f} could fall below 0.05 by pure chance.")
 
@@ -323,7 +323,7 @@ with tab6:
                 rebased_pair = prices[[a, b]] / prices[[a, b]].iloc[0] * 100
                 fig_p = px.line(rebased_pair, title=f"{label(a)} vs {label(b)} (grey = training period)")
                 fig_p.add_vrect(**shade)
-                st.plotly_chart(fig_p, use_container_width=True)
+                st.plotly_chart(fig_p, width="stretch")
 
                 fig_z = px.line(z, title="Z-score of the spread (trading only happens outside the grey area)")
                 fig_z.add_vrect(**shade)
@@ -332,11 +332,11 @@ with tab6:
                 for level in (exit_z, -exit_z):
                     fig_z.add_hline(y=level, line_dash="dot", line_color="grey")
                 fig_z.update_layout(showlegend=False)
-                st.plotly_chart(fig_z, use_container_width=True)
+                st.plotly_chart(fig_z, width="stretch")
 
                 fig_e = px.line(equity, title="Out-of-sample equity after costs (100 invested)")
                 fig_e.update_layout(showlegend=False)
-                st.plotly_chart(fig_e, use_container_width=True)
+                st.plotly_chart(fig_e, width="stretch")
                 st.caption("Costs are charged on both legs each time the position changes. "
                            "Borrowing costs for the short leg are not included.")
 with tab7:
