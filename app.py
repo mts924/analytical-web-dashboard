@@ -6,9 +6,12 @@ import itertools
 import numpy as np
 from statsmodels.tsa.stattools import coint
 import metrics as fm
+import ui
 
 st.set_page_config(page_title="Market Analytics Dashboard", layout="wide")
-st.title("Market Analytics Dashboard")
+ui.apply()
+ui.header("Market Analytics Dashboard",
+          "Performance, risk and relationships across 40+ assets · data from Yahoo Finance")
 
 # --- Asset universe ---
 UNIVERSE = {
