@@ -334,7 +334,7 @@ with tab6:
                 for level in (exit_z, -exit_z):
                     fig_z.add_hline(y=level, line_dash="dot", line_color="grey")
                 fig_z.update_layout(showlegend=False)
-                 ui.chart(fig_z, width="stretch")
+                ui.chart(fig_z, width="stretch")
 
                 fig_e = px.line(equity, title="Out-of-sample equity after costs (100 invested)")
                 fig_e.update_layout(showlegend=False)
