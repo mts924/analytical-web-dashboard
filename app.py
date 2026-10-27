@@ -115,22 +115,21 @@ st.caption("Prices are in each asset's own currency (e.g. EUR for Paris stocks, 
 # --- Automatic insight ---
 best = summary["Sharpe"].idxmax()
 riskiest = summary["Volatility"].idxmax()
-st.info(f"Best risk-adjusted asset: **{best}** (Sharpe {summary.loc[best, 'Sharpe']:.2f}). "
-        f"Most volatile: **{riskiest}** ({summary.loc[riskiest, 'Volatility']:.1%} a year).")
+ui.insight(f"Best risk-adjusted asset: <b>{best}</b> (Sharpe {summary.loc[best, 'Sharpe']:.2f}). "
+           f"Most volatile: <b>{riskiest}</b> ({summary.loc[riskiest, 'Volatility']:.1%} a year).")
 
-tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs(["📈 Performance", "⚠️ Risk", "🔗 Correlation",
-                                                    "🧺 Portfolio", "🏢 Company", "⚖️ Stat arb",
-                                                    "📘 Methodology"])
+tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs(["Performance", "Risk", "Correlation", "Portfolio",
+                                                    "Company", "Stat arb", "Methodology"])
 
 with tab1:
     rebased = prices / prices.iloc[0] * 100
-    st.plotly_chart(px.line(rebased, title="Value of 100 invested"), width="stretch")
+    ui.chart(px.line(rebased, title="Value of 100 invested"), width="stretch")
     st.caption("Every asset starts at 100, so they can be compared on the same scale.")
 
 with tab2:
-    st.plotly_chart(px.line(drawdown, title="Drawdown from peak"), width="stretch")
+    ui.chart(px.line(drawdown, title="Drawdown from peak"), width="stretch")
     rolling_vol = returns.rolling(30).std() * 252 ** 0.5
-    st.plotly_chart(px.line(rolling_vol, title="30-day rolling volatility (annualized)"),
+    ui.chart(px.line(rolling_vol, title="30-day rolling volatility (annualized)"),
                    width="stretch")
     st.subheader("Risk and return")
     st.dataframe(summary.style.format({"Total return": "{:.1%}", "Volatility": "{:.1%}",
@@ -142,7 +141,7 @@ with tab2:
 
 with tab3:
     n = len(prices.columns)
-    st.plotly_chart(px.imshow(returns.corr(), text_auto=".2f", color_continuous_scale="RdBu_r",
+    ui.chart(px.imshow(returns.corr(), text_auto=".2f", color_continuous_scale=ui.DIVERGING,
                               zmin=-1, zmax=1, title="Correlation of daily returns",
                               height=max(400, 45 * n)),
                     width="stretch")
@@ -186,7 +185,7 @@ with tab4:
         fig = px.line(chart, title="Your portfolio vs each asset (100 invested)")
         fig.update_traces(opacity=0.35)
         fig.update_traces(selector={"name": "Portfolio"}, opacity=1, line_width=4)
-        st.plotly_chart(fig, width="stretch")
+        ui.chart(fig, width="stretch")
         st.caption("Simplification: currency movements between assets are ignored.")
 
 with tab5:
@@ -326,7 +325,7 @@ with tab6:
                 rebased_pair = prices[[a, b]] / prices[[a, b]].iloc[0] * 100
                 fig_p = px.line(rebased_pair, title=f"{label(a)} vs {label(b)} (grey = training period)")
                 fig_p.add_vrect(**shade)
-                st.plotly_chart(fig_p, width="stretch")
+                ui.chart(fig_p, width="stretch")
 
                 fig_z = px.line(z, title="Z-score of the spread (trading only happens outside the grey area)")
                 fig_z.add_vrect(**shade)
@@ -335,11 +334,11 @@ with tab6:
                 for level in (exit_z, -exit_z):
                     fig_z.add_hline(y=level, line_dash="dot", line_color="grey")
                 fig_z.update_layout(showlegend=False)
-                st.plotly_chart(fig_z, width="stretch")
+                 ui.chart(fig_z, width="stretch")
 
                 fig_e = px.line(equity, title="Out-of-sample equity after costs (100 invested)")
                 fig_e.update_layout(showlegend=False)
-                st.plotly_chart(fig_e, width="stretch")
+                 ui.chart(fig_e, width="stretch")
                 st.caption("Costs are charged on both legs each time the position changes. "
                            "Borrowing costs for the short leg are not included.")
 with tab7:
