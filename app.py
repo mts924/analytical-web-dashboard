@@ -338,7 +338,7 @@ with tab6:
 
                 fig_e = px.line(equity, title="Out-of-sample equity after costs (100 invested)")
                 fig_e.update_layout(showlegend=False)
-                 ui.chart(fig_e, width="stretch")
+                ui.chart(fig_e, width="stretch")
                 st.caption("Costs are charged on both legs each time the position changes. "
                            "Borrowing costs for the short leg are not included.")
 with tab7:
