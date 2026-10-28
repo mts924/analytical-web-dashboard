@@ -1,17 +1,20 @@
+import html
+import itertools
+
+import numpy as np
 import pandas as pd
-import yfinance as yf
 import plotly.express as px
 import streamlit as st
-import itertools
-import numpy as np
+import yfinance as yf
 from statsmodels.tsa.stattools import coint
+
 import metrics as fm
 import ui
 
-st.set_page_config(page_title="Market Analytics Dashboard", layout="wide")
+st.set_page_config(page_title="Market Analytics Dashboard", page_icon="📊", layout="wide")
 ui.apply()
 ui.header("Market Analytics Dashboard",
-          "Performance, risk and relationships across 40+ assets · data from Yahoo Finance")
+          "Performance, risk and relationships across 40+ assets: stocks, ETFs, bonds, gold and crypto.")
 
 # --- Asset universe ---
 UNIVERSE = {
@@ -29,27 +32,46 @@ UNIVERSE = {
     "Crypto": {"BTC-USD": "Bitcoin", "ETH-USD": "Ethereum"},
 }
 NAMES = {t: n for group in UNIVERSE.values() for t, n in group.items()}
-DEFAULTS = ["SPY", "QQQ", "IWM", "GLD"]
+
+PRESETS = {
+    "Core markets": ["SPY", "QQQ", "IWM", "GLD"],
+    "Stocks, bonds and gold": ["SPY", "TLT", "GLD", "HYG"],
+    "Global equities": ["SPY", "VGK", "EWJ", "EEM", "EWS"],
+    "Mega-cap tech": ["AAPL", "MSFT", "NVDA", "AMZN", "GOOGL", "META"],
+    "Europe vs Asia": ["MC.PA", "TTE.PA", "AIR.PA", "D05.SI", "7203.T", "2330.TW"],
+    "Commodities and crypto": ["GLD", "SLV", "USO", "BTC-USD", "ETH-USD"],
+    "Pairs trading candidates": ["GLD", "SLV", "XLE", "USO", "SPY", "DIA"],
+}
+
 
 def label(t):
+    """Readable name used in cards, tables and charts."""
     return f"{NAMES[t]} ({t})" if t in NAMES else t
 
+
+def pick_label(t):
+    """Ticker first, so it stays visible when the sidebar truncates the text."""
+    return f"{t} · {NAMES[t]}" if t in NAMES else t
+
+
 # --- Sidebar: choose assets ---
-st.sidebar.header("Assets")
-tickers = []
-for group, assets in UNIVERSE.items():
-    default = [t for t in DEFAULTS if t in assets]
-    with st.sidebar.expander(group, expanded=bool(default)):
-        tickers += st.multiselect(group, list(assets), default=default,
-                                  format_func=label, label_visibility="collapsed")
-custom = st.sidebar.text_input("Other tickers (comma-separated)", placeholder="e.g. NFLX, SAN.PA")
+st.sidebar.markdown("### Select assets")
+preset = st.sidebar.selectbox("Start from a preset", list(PRESETS))
+tickers = st.sidebar.multiselect("Assets", [t for t in NAMES], default=PRESETS[preset],
+                                 format_func=pick_label, placeholder="Search by name or ticker")
+custom = st.sidebar.text_input("Add other tickers", placeholder="e.g. NFLX, SAN.PA",
+                               help="Any ticker known to Yahoo Finance. Suffixes: .PA Paris, .SI Singapore, "
+                                    ".T Tokyo, .HK Hong Kong.")
 tickers += [t.strip().upper() for t in custom.split(",") if t.strip()]
 tickers = list(dict.fromkeys(tickers))  # remove duplicates, keep order
-period = st.sidebar.selectbox("Period", ["6mo", "1y", "2y", "5y"], index=1)
+st.sidebar.markdown("### Period")
+period = st.sidebar.radio("Period", ["6mo", "1y", "2y", "5y"], index=1, horizontal=True,
+                          label_visibility="collapsed")
 
 if not tickers:
-    st.warning("Pick at least one asset.")
+    st.warning("Pick at least one asset in the sidebar.")
     st.stop()
+
 
 # --- Data (cached for 1 hour) ---
 @st.cache_data(ttl=3600)
@@ -59,12 +81,14 @@ def load_prices(tickers, period):
         data = data.to_frame(tickers[0])
     return data
 
+
 @st.cache_data(ttl=86400)
 def load_info(ticker):
     try:
         return yf.Ticker(ticker).info
     except Exception:
         return {}
+
 
 data = load_prices(tickers, period).dropna(axis=1, how="all")
 missing = [t for t in tickers if t not in data.columns]
@@ -77,6 +101,8 @@ if prices.empty or len(prices) < 2:
     st.error("Not enough data to analyze. Try other assets or a longer period.")
     st.stop()
 returns = prices.pct_change().dropna()
+named_prices = prices.rename(columns=label)  # same data, readable names, for charts
+
 
 # --- Risk-free rate: 3-month US T-bill (^IRX, quoted in % per year) ---
 @st.cache_data(ttl=86400)
@@ -86,8 +112,8 @@ def load_risk_free(period):
         irx = irx.iloc[:, 0]
     return float(irx.dropna().mean() / 100) if not irx.dropna().empty else 0.0
 
+
 rf_annual = load_risk_free(period)
-rf_daily = rf_annual / 252
 
 # --- Metrics (calculations live in metrics.py) ---
 total_return = fm.total_return(prices)
@@ -101,50 +127,60 @@ bench_ret = load_prices(["SPY"], period)["SPY"].pct_change().reindex(returns.ind
 beta, alpha = {}, {}
 for t in returns.columns:
     beta[t], alpha[t] = fm.beta_alpha(returns[t], bench_ret, rf_annual)
+
 summary = pd.DataFrame({"Total return": total_return, "Volatility": volatility,
                         "Sharpe": sharpe, "Sortino": sortino, "Max drawdown": drawdown.min(),
                         "Beta": pd.Series(beta), "Alpha": pd.Series(alpha)})
 summary.index = [label(t) for t in summary.index]
+
 # --- KPI cards, 4 per row ---
 for i in range(0, len(prices.columns), 4):
     row = st.columns(4)
     for col, t in zip(row, prices.columns[i:i + 4]):
         col.metric(label(t), f"{prices[t].iloc[-1]:,.2f}", f"{total_return[t]:+.1%}")
-st.caption("Prices are in each asset's own currency (e.g. EUR for Paris stocks, SGD for DBS).")
+st.caption(f"Data as of {prices.index[-1]:%d %b %Y}. Prices are in each asset's own currency "
+           f"(e.g. EUR for Paris stocks, SGD for DBS).")
 
 # --- Automatic insight ---
 best = summary["Sharpe"].idxmax()
 riskiest = summary["Volatility"].idxmax()
-ui.insight(f"Best risk-adjusted asset: <b>{best}</b> (Sharpe {summary.loc[best, 'Sharpe']:.2f}). "
-           f"Most volatile: <b>{riskiest}</b> ({summary.loc[riskiest, 'Volatility']:.1%} a year).")
+ui.insight(f"Best risk-adjusted asset: <b>{html.escape(best)}</b> (Sharpe {summary.loc[best, 'Sharpe']:.2f}). "
+           f"Most volatile: <b>{html.escape(riskiest)}</b> ({summary.loc[riskiest, 'Volatility']:.1%} a year).")
 
 tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs(["Performance", "Risk", "Correlation", "Portfolio",
                                                     "Company", "Stat arb", "Methodology"])
 
 with tab1:
-    rebased = prices / prices.iloc[0] * 100
+    rebased = named_prices / named_prices.iloc[0] * 100
     ui.chart(px.line(rebased, title="Value of 100 invested"), width="stretch")
     st.caption("Every asset starts at 100, so they can be compared on the same scale.")
 
 with tab2:
-    ui.chart(px.line(drawdown, title="Drawdown from peak"), width="stretch")
+    ui.chart(px.line(drawdown.rename(columns=label), title="Drawdown from peak"), width="stretch")
     rolling_vol = returns.rolling(30).std() * 252 ** 0.5
-    ui.chart(px.line(rolling_vol, title="30-day rolling volatility (annualized)"),
-                   width="stretch")
+    ui.chart(px.line(rolling_vol.rename(columns=label), title="30-day rolling volatility (annualized)"),
+             width="stretch")
     st.subheader("Risk and return")
-    st.dataframe(summary.style.format({"Total return": "{:.1%}", "Volatility": "{:.1%}",
-                                       "Sharpe": "{:.2f}", "Sortino": "{:.2f}",
-                                       "Max drawdown": "{:.1%}", "Beta": "{:.2f}",
-                                       "Alpha": "{:+.1%}"}))
+
+
+    def tone(v):
+        return f"color: {ui.GREEN}" if v > 0 else f"color: {ui.RED}"
+
+
+    styled = (summary.style
+              .format({"Total return": "{:+.1%}", "Volatility": "{:.1%}", "Sharpe": "{:.2f}",
+                       "Sortino": "{:.2f}", "Max drawdown": "{:.1%}", "Beta": "{:.2f}", "Alpha": "{:+.1%}"})
+              .map(tone, subset=["Total return", "Alpha"]))
+    st.dataframe(styled, width="stretch")
     st.caption(f"Sharpe and Sortino use a risk-free rate of {rf_annual:.2%} a year "
                f"(average 3-month US T-bill over the period). Beta and alpha are measured against the S&P 500.")
 
 with tab3:
     n = len(prices.columns)
-    ui.chart(px.imshow(returns.corr(), text_auto=".2f", color_continuous_scale=ui.DIVERGING,
-                              zmin=-1, zmax=1, title="Correlation of daily returns",
-                              height=max(400, 45 * n)),
-                    width="stretch")
+    corr = returns.rename(columns=label).corr()
+    ui.chart(px.imshow(corr, text_auto=".2f", color_continuous_scale=ui.DIVERGING,
+                       zmin=-1, zmax=1, title="Correlation of daily returns", height=max(420, 50 * n)),
+             width="stretch")
     st.caption("Close to 1 = they move together. Low or negative = good diversification.")
 
 with tab4:
@@ -181,7 +217,7 @@ with tab4:
                        f"{avg_vol:.1%}, but your portfolio's is only {p_vol:.1%}, "
                        f"because the assets don't move perfectly together.")
 
-        chart = (prices / prices.iloc[0] * 100).assign(Portfolio=port_value)
+        chart = (named_prices / named_prices.iloc[0] * 100).assign(Portfolio=port_value)
         fig = px.line(chart, title="Your portfolio vs each asset (100 invested)")
         fig.update_traces(opacity=0.35)
         fig.update_traces(selector={"name": "Portfolio"}, opacity=1, line_width=4)
@@ -192,6 +228,7 @@ with tab5:
     pick = st.selectbox("Choose an asset", list(prices.columns), format_func=label)
     info = load_info(pick)
 
+
     def fmt_big(x):
         if not isinstance(x, (int, float)):
             return "—"
@@ -200,8 +237,10 @@ with tab5:
                 return f"{x / div:.1f}{suffix}"
         return f"{x:,.0f}"
 
+
     def fmt_num(x):
         return f"{x:.2f}" if isinstance(x, (int, float)) else "—"
+
 
     if not info:
         st.warning("Details are unavailable for this asset right now.")
@@ -222,12 +261,7 @@ with tab5:
         summary_text = info.get("longBusinessSummary")
         if summary_text:
             st.write(summary_text)
-import itertools
-import numpy as np
-from statsmodels.tsa.stattools import coint
-import metrics as fm
-tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(["📈 Performance", "⚠️ Risk", "🔗 Correlation",
-                                              "🧺 Portfolio", "🏢 Company", "⚖️ Stat arb"])
+
 with tab6:
     st.write("Pairs trading: find two assets whose prices are tied together, "
              "and bet on their gap closing when it gets unusually wide.")
@@ -255,6 +289,7 @@ with tab6:
                 for a, b in itertools.combinations(log_p.columns, 2):
                     rows.append({"a": a, "b": b, "p-value": coint(log_p[a], log_p[b])[1]})
                 return pd.DataFrame(rows).sort_values("p-value")
+
 
             pairs = scan_pairs(train)
             st.subheader("1. Pair scanner (training period)")
@@ -285,6 +320,7 @@ with tab6:
                 spread = log_p[a] - beta * log_p[b]
                 s_tr = spread.loc[train.index]
                 half_life = fm.half_life(s_tr)
+
                 # The rolling z-score only uses past data, so it can be computed everywhere
                 z = (spread - spread.rolling(window).mean()) / spread.rolling(window).std()
 
@@ -322,7 +358,7 @@ with tab6:
 
                 shade = dict(x0=log_p.index[0], x1=split_date, fillcolor="grey", opacity=0.15, line_width=0)
 
-                rebased_pair = prices[[a, b]] / prices[[a, b]].iloc[0] * 100
+                rebased_pair = named_prices[[label(a), label(b)]] / named_prices[[label(a), label(b)]].iloc[0] * 100
                 fig_p = px.line(rebased_pair, title=f"{label(a)} vs {label(b)} (grey = training period)")
                 fig_p.add_vrect(**shade)
                 ui.chart(fig_p, width="stretch")
@@ -341,6 +377,7 @@ with tab6:
                 ui.chart(fig_e, width="stretch")
                 st.caption("Costs are charged on both legs each time the position changes. "
                            "Borrowing costs for the short leg are not included.")
+
 with tab7:
     st.header("Methodology")
     st.write("How every number in this dashboard is calculated.")
@@ -396,3 +433,5 @@ with tab7:
 """)
 
     st.warning("This dashboard is an educational project and does not constitute investment advice.")
+
+ui.footer("Educational project, not investment advice · Data: Yahoo Finance · Built with Python and Streamlit")
