@@ -1,6 +1,8 @@
 """Look and feel of the dashboard: colors, chart template and small layout helpers.
 
 The font itself (Inter) is set in .streamlit/config.toml, so it applies to every widget."""
+import html
+
 import plotly.graph_objects as go
 import plotly.io as pio
 import streamlit as st
@@ -14,9 +16,8 @@ FONT = "Inter, -apple-system, 'Segoe UI', Roboto, sans-serif"
 pio.templates["dashboard"] = go.layout.Template(layout=go.Layout(
     font=dict(family=FONT, size=13, color="#14213D"),
     colorway=PALETTE,
-    title=dict(font=dict(size=16), x=0, xanchor="left"),
-    legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0),
-    margin=dict(l=10, r=10, t=70, b=10),
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0, font=dict(size=12)),
+    margin=dict(l=10, r=10, t=30, b=10),
     xaxis=dict(showgrid=False, linecolor="#D0D5DD"),
     yaxis=dict(gridcolor="#EEF0F3", zeroline=False),
     paper_bgcolor="rgba(0,0,0,0)",
@@ -57,9 +58,26 @@ footer, #MainMenu { visibility: hidden; }
 [data-testid="stDataFrame"] { border: 1px solid #E4E8EE; border-radius: 10px; overflow: hidden; }
 [data-testid="stSidebar"] h3 { font-size: 1.05rem; font-weight: 600; margin-bottom: .2rem; }
 
+/* Chart titles live outside the figure so they never collide with the legend */
+.chart-title { font-weight: 600; font-size: 1rem; color: #14213D; margin: 1.2rem 0 .2rem 0; }
+.mobile-hint { display: none; color: #5B6B7F; font-size: .85rem; margin: -.6rem 0 1rem 0; }
+
 /* Footer */
 .footer {
     color: #8A97A8; font-size: .8rem; border-top: 1px solid #E4E8EE; margin-top: 2.5rem; padding-top: 1rem;
+}
+
+/* Phones: KPI cards two per row, smaller title and cards */
+@media (max-width: 640px) {
+    .block-container { padding: 1.5rem 1rem 3rem 1rem; }
+    .hero h1 { font-size: 1.6rem; }
+    .hero p { font-size: .92rem; margin-bottom: 1rem; }
+    .mobile-hint { display: block; }
+    [data-testid="stColumn"]:has([data-testid="stMetric"]) { min-width: calc(50% - 1rem) !important; }
+    [data-testid="stMetric"] { padding: 10px 12px; }
+    [data-testid="stMetricValue"], [data-testid="stMetricValue"] * { font-size: 1.35rem; }
+    [data-testid="stMetricLabel"] p { font-size: .72rem; }
+    .insight { padding: 10px 14px; font-size: .92rem; }
 }
 </style>
 """
@@ -78,12 +96,22 @@ def insight(html):
     st.markdown(f'<div class="insight">{html}</div>', unsafe_allow_html=True)
 
 
+def mobile_hint():
+    """Visible on phones only: the sidebar is folded away there."""
+    st.markdown('<div class="mobile-hint">Tap the » arrow at the top left to choose assets and period.</div>',
+                unsafe_allow_html=True)
+
+
 def footer(text):
     st.markdown(f'<div class="footer">{text}</div>', unsafe_allow_html=True)
 
 
 def chart(fig, **kwargs):
-    """Drop-in replacement for st.plotly_chart: cleaner axes, hover, size and no toolbar."""
+    """Drop-in replacement for st.plotly_chart: title above the chart, cleaner axes and hover, no toolbar."""
+    title = fig.layout.title.text
+    if title:
+        st.markdown(f'<div class="chart-title">{html.escape(title)}</div>', unsafe_allow_html=True)
+    fig.update_layout(title_text=None)
     fig.update_xaxes(title_text=None)
     fig.update_yaxes(title_text=None)
     fig.update_layout(legend_title_text=None)
