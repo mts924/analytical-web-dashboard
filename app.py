@@ -15,6 +15,7 @@ st.set_page_config(page_title="Market Analytics Dashboard", page_icon="📊", la
 ui.apply()
 ui.header("Market Analytics Dashboard",
           "Performance, risk and relationships across 40+ assets: stocks, ETFs, bonds, gold and crypto.")
+ui.mobile_hint()
 
 # --- Asset universe ---
 UNIVERSE = {
