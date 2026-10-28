@@ -1,4 +1,6 @@
-"""Look and feel of the dashboard: colors, chart template and small layout helpers."""
+"""Look and feel of the dashboard: colors, chart template and small layout helpers.
+
+The font itself (Inter) is set in .streamlit/config.toml, so it applies to every widget."""
 import plotly.graph_objects as go
 import plotly.io as pio
 import streamlit as st
@@ -24,11 +26,6 @@ pio.templates.default = "plotly_white+dashboard"
 
 CSS = """
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
-
-.stApp, .stApp p, .stApp label, .stApp h1, .stApp h2, .stApp h3, .stApp h4 {
-    font-family: 'Inter', -apple-system, 'Segoe UI', sans-serif;
-}
 .block-container { padding-top: 2.5rem; max-width: 1250px; }
 footer, #MainMenu { visibility: hidden; }
 
@@ -38,11 +35,13 @@ footer, #MainMenu { visibility: hidden; }
 
 /* KPI cards */
 [data-testid="stMetric"] {
-    background: #F4F6F8; border: 1px solid #E4E8EE; border-radius: 12px; padding: 14px 18px;
+    background: #F4F6F8; border: 1px solid #E4E8EE; border-radius: 12px; padding: 12px 16px;
     box-shadow: 0 1px 2px rgba(16, 24, 40, .05);
 }
 [data-testid="stMetricLabel"] p { color: #5B6B7F; font-size: .82rem; font-weight: 500; }
-[data-testid="stMetricValue"] { font-weight: 600; font-variant-numeric: tabular-nums; }
+[data-testid="stMetricValue"], [data-testid="stMetricValue"] * {
+    font-size: 1.75rem; font-weight: 600; font-variant-numeric: tabular-nums;
+}
 
 /* Insight box */
 .insight {
