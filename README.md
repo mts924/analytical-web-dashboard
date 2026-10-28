@@ -23,7 +23,10 @@ An interactive web dashboard to analyze the performance, risk and relationships 
 | 📘 Methodology | Every formula used in the app |
 
 ![Statistical arbitrage tab]
-<img width="1464" height="832" alt="Capture d’écran 2026-10-21 à 21 21 01" src="https://github.com/user-attachments/assets/612006b3-387e-4179-b92b-74a6b86df42c" />
+<img width="1469" height="838" alt="Capture d’écran 2026-10-28 à 14 13 22" src="https://github.com/user-attachments/assets/ad4680e4-d1ee-4625-a308-b64947e6de9a" />
+<img width="1469" height="838" alt="Capture d’écran 2026-10-28 à 14 13 38" src="https://github.com/user-attachments/assets/35225108-f635-413a-b368-7e3d7b85ba56" />
+
+
 
 
 ## Methodology highlights
