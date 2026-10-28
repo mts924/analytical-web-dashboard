@@ -74,7 +74,7 @@ if not tickers:
 
 
 # --- Data (cached for 1 hour) ---
-@st.cache_data(ttl=3600)
+@st.cache_data(ttl=3600, show_spinner="Loading market data…")
 def load_prices(tickers, period):
     data = yf.download(tickers, period=period, progress=False)["Close"]
     if isinstance(data, pd.Series):
@@ -82,7 +82,7 @@ def load_prices(tickers, period):
     return data
 
 
-@st.cache_data(ttl=86400)
+@st.cache_data(ttl=86400, show_spinner=False)
 def load_info(ticker):
     try:
         return yf.Ticker(ticker).info
@@ -90,7 +90,32 @@ def load_info(ticker):
         return {}
 
 
-data = load_prices(tickers, period).dropna(axis=1, how="all")
+@st.cache_data(ttl=86400, show_spinner=False)
+def load_name(ticker):
+    """Readable name of a ticker typed by the user (empty if Yahoo does not know it)."""
+    try:
+        info = yf.Ticker(ticker).info
+        return info.get("shortName") or info.get("longName") or ""
+    except Exception:
+        return ""
+
+
+# Tickers typed by hand get their real name, so "BTC" shows what it really is
+for t in tickers:
+    if t not in NAMES:
+        name = load_name(t)
+        if name and name.upper() != t:
+            NAMES[t] = name
+
+try:
+    data = load_prices(tickers, period).dropna(axis=1, how="all")
+    spy_prices = load_prices(["SPY"], period)["SPY"]
+except Exception:
+    st.error("Market data is temporarily unavailable (Yahoo Finance did not answer). "
+             "Please try again in a minute.")
+    st.stop()
+
+data = data[[t for t in tickers if t in data.columns]]  # keep the order chosen in the sidebar
 missing = [t for t in tickers if t not in data.columns]
 if missing:
     st.warning(f"No data found for: {', '.join(missing)}")
@@ -105,12 +130,15 @@ named_prices = prices.rename(columns=label)  # same data, readable names, for ch
 
 
 # --- Risk-free rate: 3-month US T-bill (^IRX, quoted in % per year) ---
-@st.cache_data(ttl=86400)
+@st.cache_data(ttl=86400, show_spinner=False)
 def load_risk_free(period):
-    irx = yf.download("^IRX", period=period, progress=False)["Close"]
-    if isinstance(irx, pd.DataFrame):
-        irx = irx.iloc[:, 0]
-    return float(irx.dropna().mean() / 100) if not irx.dropna().empty else 0.0
+    try:
+        irx = yf.download("^IRX", period=period, progress=False)["Close"]
+        if isinstance(irx, pd.DataFrame):
+            irx = irx.iloc[:, 0]
+        return float(irx.dropna().mean() / 100) if not irx.dropna().empty else 0.0
+    except Exception:
+        return 0.0
 
 
 rf_annual = load_risk_free(period)
@@ -123,7 +151,7 @@ sortino = fm.sortino_ratio(returns, rf_annual)
 drawdown = fm.drawdown(prices)
 
 # --- Beta and alpha vs the S&P 500 (CAPM) ---
-bench_ret = load_prices(["SPY"], period)["SPY"].pct_change().reindex(returns.index)
+bench_ret = spy_prices.pct_change().reindex(returns.index)
 beta, alpha = {}, {}
 for t in returns.columns:
     beta[t], alpha[t] = fm.beta_alpha(returns[t], bench_ret, rf_annual)
@@ -133,10 +161,12 @@ summary = pd.DataFrame({"Total return": total_return, "Volatility": volatility,
                         "Beta": pd.Series(beta), "Alpha": pd.Series(alpha)})
 summary.index = [label(t) for t in summary.index]
 
-# --- KPI cards, 4 per row ---
-for i in range(0, len(prices.columns), 4):
-    row = st.columns(4)
-    for col, t in zip(row, prices.columns[i:i + 4]):
+# --- KPI cards: 4 per row, or spread evenly when there are more than 4 (5 -> 3 + 2) ---
+n_assets = len(prices.columns)
+per_row = 4 if n_assets <= 4 else -(-n_assets // -(-n_assets // 4))
+for i in range(0, n_assets, per_row):
+    row = st.columns(per_row)
+    for col, t in zip(row, prices.columns[i:i + per_row]):
         col.metric(label(t), f"{prices[t].iloc[-1]:,.2f}", f"{total_return[t]:+.1%}")
 st.caption(f"Data as of {prices.index[-1]:%d %b %Y}. Prices are in each asset's own currency "
            f"(e.g. EUR for Paris stocks, SGD for DBS).")
@@ -172,6 +202,8 @@ with tab2:
                        "Sortino": "{:.2f}", "Max drawdown": "{:.1%}", "Beta": "{:.2f}", "Alpha": "{:+.1%}"})
               .map(tone, subset=["Total return", "Alpha"]))
     st.dataframe(styled, width="stretch")
+    st.download_button("Download table (CSV)", summary.to_csv().encode("utf-8"),
+                       file_name="risk_and_return.csv", mime="text/csv")
     st.caption(f"Sharpe and Sortino use a risk-free rate of {rf_annual:.2%} a year "
                f"(average 3-month US T-bill over the period). Beta and alpha are measured against the S&P 500.")
 
@@ -186,9 +218,9 @@ with tab3:
 with tab4:
     st.write("Choose how much to put in each asset. Weights are rescaled to add up to 100%.")
     w_raw = {}
-    for i in range(0, len(prices.columns), 4):
-        row = st.columns(4)
-        for col, t in zip(row, prices.columns[i:i + 4]):
+    for i in range(0, n_assets, per_row):
+        row = st.columns(per_row)
+        for col, t in zip(row, prices.columns[i:i + per_row]):
             w_raw[t] = col.slider(label(t), 0, 100, 25, step=5)
 
     if sum(w_raw.values()) == 0:
@@ -283,7 +315,7 @@ with tab6:
             st.warning("Not enough data for a train/test split. Choose a longer period (2y or 5y).")
         else:
             # --- 1. Scan pairs on the TRAINING period only ---
-            @st.cache_data(ttl=3600)
+            @st.cache_data(ttl=3600, show_spinner="Scanning pairs…")
             def scan_pairs(log_p):
                 rows = []
                 for a, b in itertools.combinations(log_p.columns, 2):
