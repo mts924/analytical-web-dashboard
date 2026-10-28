@@ -6,7 +6,8 @@
 An interactive web dashboard to analyze the performance, risk and relationships of 40+ assets
 (ETFs, US / European / Asian stocks, bonds, commodities and crypto), built in Python with Streamlit.
 
-<img width="1464" height="832" alt="Capture d’écran 2026-10-21 à 21 18 05" src="https://github.com/user-attachments/assets/3aa13f2f-561c-4583-9165-46529dac24ce" />
+<img width="1469" height="838" alt="Capture d’écran 2026-10-28 à 14 12 13" src="https://github.com/user-attachments/assets/ab5bfc27-23df-46a1-8c30-8df301a04358" />
+
 
 
 ## Features
